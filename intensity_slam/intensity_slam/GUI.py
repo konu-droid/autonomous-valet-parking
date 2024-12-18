@@ -1,85 +1,108 @@
 import tkinter as tk
-from tkinter import messagebox
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+from avp_resources.msg import ButtonStates
 
-
-class ParkingLotGUI(Node):
+class ButtonGUI(Node):
     def __init__(self):
-        super().__init__('parking_lot_gui')
+        super().__init__('button_gui')
 
-        self.parking_status = {f"space_{i}": "EMPTY" for i in range(1, 17)}
-        self.button_widgets = {}
+        # ROS2 Publishers and Subscribers
+        self.button_state_pub = self.create_publisher(String, 'button_status', 10)
+        self.button_update_sub = self.create_subscription(ButtonStates, 'update_buttons', self.update_button_states, 10)
 
-        self.publisher_ = self.create_publisher(String, 'retrieve_car', 10)
-        self.subscription = self.create_subscription(
-            String, 'parking_status', self.update_parking_status, 10
-        )
+        # Initialize the array that determines button state
+        self.button_states = ["vacant"] * 16  # "vacant" or "occupied"
 
+        # Create the main window
         self.root = tk.Tk()
-        self.root.title("Parking Lot Manager")
-        self.root.geometry("600x400")
+        self.root.title("Dynamic Button GUI")
 
-        self.create_buttons()
-
-        # Create a ROS2 timer to spin periodically
-        self.create_timer(0.1, self.spin_once)
-
-    def create_buttons(self):
-        for i in range(1, 17):
-            btn_text = f"Space {i}\nEMPTY"
-            btn = tk.Button(
-                self.root, text=btn_text, bg="green", width=15, height=3,
-                command=lambda space=f"space_{i}": self.request_car_retrieval(space)
+        # Create a grid of buttons
+        self.buttons = []
+        for i in range(16):
+            button = tk.Button(
+                self.root,
+                text="Vacant",
+                bg="green",
+                fg="white",
+                command=lambda i=i: self.on_button_click(i),
+                width=10,
+                height=2,
             )
-            btn.grid(row=(i - 1) // 4, column=(i - 1) % 4, padx=5, pady=5)
-            self.button_widgets[f"space_{i}"] = btn
+            button.grid(row=i // 4, column=i % 4, padx=5, pady=5)
+            self.buttons.append(button)
 
-    def update_parking_status(self, msg):
-        data = msg.data.split(',')
-        if len(data) != 2:
-            self.get_logger().error(f"Invalid message format: {msg.data}")
-            return
+        # Add the Park button
+        park_button = tk.Button(
+            self.root,
+            text="Park",
+            bg="blue",
+            fg="white",
+            command=self.on_park_button_click,
+            width=10,
+            height=2,
+        )
+        park_button.grid(row=4, column=0, columnspan=4, pady=10)
 
-        space_id, number_plate = data
-        if space_id in self.parking_status:
-            self.parking_status[space_id] = number_plate if number_plate != "EMPTY" else "EMPTY"
-            self.update_button(space_id, number_plate)
+        # Initialize button states
+        self.update_buttons()
 
-    def update_button(self, space_id, number_plate):
-        btn = self.button_widgets.get(space_id)
-        if btn:
-            if number_plate == "EMPTY":
-                btn.config(text=f"{space_id.replace('_', ' ').title()}\nEMPTY", bg="green")
+    def update_buttons(self):
+        """Update the buttons based on the button_states array."""
+        for i, button in enumerate(self.buttons):
+            if self.button_states[i] == "vacant":
+                button.config(bg="green", text="Vacant")
             else:
-                btn.config(text=f"{space_id.replace('_', ' ').title()}\n{number_plate}", bg="red")
+                button.config(bg="red", text="Occupied")
 
-    def request_car_retrieval(self, space_id):
-        if self.parking_status[space_id] == "EMPTY":
-            messagebox.showinfo("Info", f"Parking space {space_id.replace('_', ' ').title()} is empty.")
-        else:
+    def on_button_click(self, button_id):
+        """Handle button click event."""
+        if self.button_states[button_id] == "occupied":
             msg = String()
-            msg.data = space_id
-            self.publisher_.publish(msg)
-            messagebox.showinfo("Info", f"Requested retrieval for {space_id.replace('_', ' ').title()}.")
+            msg.data = f"Button ID: {button_id}, Text: Occupied"
+            self.button_state_pub.publish(msg)
+            self.button_states[button_id] = "vacant"
+        self.update_buttons()
 
-    def spin_once(self):
-        rclpy.spin_once(self, timeout_sec=0.1)
+    def on_park_button_click(self):
+        """Handle the Park button click event."""
+        vacant_button_id = next((i for i, state in enumerate(self.button_states) if state == "vacant"), None)
+        if vacant_button_id is not None:
+            msg = String()
+            msg.data = f"Button ID: {vacant_button_id}, Text: Park"
+            self.button_state_pub.publish(msg)
+        print("Success")
 
-    def run(self):
+    def update_button_states(self, msg):
+        """Update the button states based on the received ROS2 topic."""
+        if len(msg.data) == 16:
+            self.button_states = msg.data
+            self.update_buttons()
+
+    def start_gui(self):
         self.root.mainloop()
 
 
 def main(args=None):
     rclpy.init(args=args)
-    parking_lot_gui = ParkingLotGUI()
+    button_gui = ButtonGUI()
+
+    # Run the GUI in a separate thread
+    import threading
+    gui_thread = threading.Thread(target=button_gui.start_gui)
+    gui_thread.start()
+
+    # Spin the ROS2 node
     try:
-        rclpy.spin(parking_lot_gui)
-        parking_lot_gui.run()
+        rclpy.spin(button_gui)
+    except KeyboardInterrupt:
+        pass
     finally:
-        parking_lot_gui.destroy_node()
+        button_gui.destroy_node()
         rclpy.shutdown()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -56,7 +56,7 @@ def generate_launch_description():
     
     return LaunchDescription([
         static_tf,
-        # slam_node,
+        slam_node,
         filter_node,
-        # rviz_node,
+        rviz_node,
     ])
